@@ -1,0 +1,7 @@
+azure-functions==1.21.3
+azure-storage-blob==12.24.1
+python-docx==1.1.2
+pandoc==2.4
+packaging==23.2
+resolvelib==0.8.1
+wheel==0.42.0
