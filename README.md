@@ -32,62 +32,6 @@ export PATH=$PATH:~/handson/azure-functions-cli
 # Funcコマンド確認
 func --version
 ```
-
-## Azureリソース作成
-```bash
-# 変数設定（自分の名前を小文字で設定）
-NAME=<your-name>
-myResourceGroup=<your-resource-group-name>
-LOCATION=japaneast
-
-# 既存のストレージアカウントを利用する場合は下記を設定。違うリソースグループにあるストレージアカウントを指定すると手順エラーになるため注意
-ConnectionString=<your-storage-connection-string>
-
-# ストレージアカウント作成 ※既存のストレージアカウントを利用する場合はスキップ
-az storage account create --name mystorageaccount${NAME} \
-                          --resource-group ${myResourceGroup} \
-                          --location ${LOCATION} \
-                          --sku Standard_LRS
-
-# ストレージアカウントの接続文字列を取得 ※既存のストレージアカウントを利用する場合はスキップ
-ConnectionString=$(az storage account show-connection-string \
---name mystorageaccount${NAME} \
---resource-group ${myResourceGroup} \
---query connectionString \
---output tsv)
-
-# Container Registry作成
-az acr create --name wordtomdacr${NAME} \
-              --resource-group ${myResourceGroup} \
-              --sku Basic \
-              --admin-enabled true
-
-# Container Apps環境作成
-az containerapp env create \
-  --name managed-environment-${NAME} \
-  --resource-group ${myResourceGroup} \
-  --location japaneast
-
-# Function App作成
-az functionapp create \
-  --name wordtomarkdownapp-${NAME} \
-  --resource-group ${myResourceGroup} \
-  --storage-account mystorageaccount${NAME} \
-  --environment managed-environment-${NAME}
-
-# アプリケーション設定の追加
-az functionapp config appsettings set --name wordtomarkdownapp-${NAME} \
-                                     --resource-group ${myResourceGroup} \
-                                     --settings AzureStorageConnectionString=${ConnectionString}
-
-# Blobストレージのコンテナ作成
-az storage container create --name word-input \
-  --connection-string "${ConnectionString}"
-
-az storage container create --name md-output \
-  --connection-string "${ConnectionString}"
-```
-
 ## プロジェクトセットアップ
 
 ### プロジェクト作成　※code コマンドはVSCodeを起動するので修正後、Crtl+sで保存し、Ctrl+q で閉じる
@@ -181,18 +125,6 @@ code WordToMarkdownFunction/function.json
     ]
 }
 ```
-
-### フォルダ構造の確認
-WordToMarkdown/
-├── README.md
-├── Dockerfile
-├── requirements.txt
-├── host.json
-├── local.settings.json
-└── WordToMarkdownFunction/
-    ├── __init__.py
-    └── function.json
-
 ```bash
 code WordToMarkdownFunction/__init__.py
 ```
@@ -320,16 +252,98 @@ def main(req: func.HttpRequest) -> func.HttpResponse:
        )
 ```
 
+### フォルダ構造の確認
+```
+WordToMarkdown/
+├── README.md
+├── Dockerfile
+├── requirements.txt
+├── host.json
+├── local.settings.json
+└── WordToMarkdownFunction/
+    ├── __init__.py
+    └── function.json
+``` 
+
+## Azureリソース作成
+```bash
+# 変数設定（自分の名前を小文字で設定）
+NAME=<your-name>
+myResourceGroup=<your-resource-group-name>
+LOCATION=japaneast
+
+# 既存のストレージアカウントを利用する場合は下記を設定。違うリソースグループにあるストレージアカウントを指定すると手順エラーになるため注意
+ConnectionString=<your-storage-connection-string>
+
+# ストレージアカウント作成 ※既存のストレージアカウントを利用する場合はスキップ
+az storage account create --name mystorageaccount${NAME} \
+                          --resource-group ${myResourceGroup} \
+                          --location ${LOCATION} \
+                          --sku Standard_LRS
+
+# ストレージアカウントの接続文字列を取得 ※既存のストレージアカウントを利用する場合はスキップ
+ConnectionString=$(az storage account show-connection-string \
+--name mystorageaccount${NAME} \
+--resource-group ${myResourceGroup} \
+--query connectionString \
+--output tsv)
+
+# Container Registry作成
+az acr create --name wordtomdacr${NAME} \
+              --resource-group ${myResourceGroup} \
+              --sku Basic \
+              --admin-enabled true
+
+# 管理者ユーザー名とパスワードを変数に格納
+ACR_USERNAME=$(az acr credential show --name wordtomdacr${NAME} --query "username" --output tsv)
+ACR_PASSWORD=$(az acr credential show --name wordtomdacr${NAME} --query "passwords[0].value" --output tsv)
+
+# Container Apps環境作成
+az containerapp env create \
+  --name managed-environment-${NAME} \
+  --resource-group ${myResourceGroup} \
+  --location japaneast
+
+# Function App作成
+az functionapp create \
+  --name wordtomarkdownapp-${NAME} \
+  --resource-group ${myResourceGroup} \
+  --storage-account mystorageaccount${NAME} \
+  --environment managed-environment-${NAME}
+
+# Blobストレージのコンテナ作成
+az storage container create --name word-input \
+  --connection-string "${ConnectionString}"
+
+az storage container create --name md-output \
+  --connection-string "${ConnectionString}"
+```
+
+
 ## デプロイ
 ```bash
 # イメージのビルドとプッシュ
 az acr build --registry wordtomdacr${NAME} --image wordtomdapp:v1 .
 
-# Function AppにContainerを設定
+# Function Appにコンテナを設定
 az functionapp config container set --name wordtomarkdownapp-${NAME} \
   --resource-group ${myResourceGroup} \
-  --image wordtomdacr${NAME}.azurecr.io/wordtomdapp:v1
+  --image wordtomdacr${NAME}.azurecr.io/wordtomdapp:v1 \
+  --registry-server wordtomdacr${NAME}.azurecr.io \
+  --registry-username $ACR_USERNAME \
+  --registry-password $ACR_PASSWORD
+
+# アプリケーション設定の追加
+az functionapp config appsettings set --name wordtomarkdownapp-${NAME} \
+                                     --resource-group ${myResourceGroup} \
+                                     --settings AzureStorageConnectionString=${ConnectionString}
+
+# CORSにAzure Portalを追加
+az functionapp cors add --name wordtomarkdownapp-${NAME} \
+  --resource-group ${myResourceGroup} \
+  --allowed-origins https://portal.azure.com
 ```
+
 
 ## 使用方法
 1. Wordファイルを `word-input` コンテナにアップロード
@@ -337,8 +351,9 @@ az functionapp config container set --name wordtomarkdownapp-${NAME} \
 2. Function App に下記JSONをPOSTリクエスト
 ```json
 {
-  "inputContainer": "word-input",
-  "inputBlobPath": "example.docx"
+    "inputContainer": "word-input",
+    "inputBlobPath": "SAMPLE_会議室予約システム機能設計書.docx",
+    "outputContainer": "md-output"
 }
 ```
 
