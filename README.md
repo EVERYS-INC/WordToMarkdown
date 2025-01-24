@@ -25,9 +25,9 @@ wget https://github.com/Azure/azure-functions-core-tools/releases/download/4.0.6
 unzip -d azure-functions-cli Azure.Functions.Cli.linux-x64.4.0.6610.zip
 
 # 実行権限付与
-chmod +x ~/handson/azure-functions-cli/func
-chmod +x ~/handson/azure-functions-cli/gozip
-export PATH=$PATH:~/handson/azure-functions-cli
+chmod +x ~/azure-functions-cli/func
+chmod +x ~/azure-functions-cli/gozip
+export PATH=$PATH:~/azure-functions-cli
 
 # Funcコマンド確認
 func --version
