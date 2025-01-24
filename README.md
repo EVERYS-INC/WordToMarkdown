@@ -101,8 +101,8 @@ code host.json
 
 ### WordToMarkdownFunction作成
 ```bash
-mkdir WordToMarkdownFunction
-code WordToMarkdownFunction/function.json
+mkdir WordToMarkdownFunction && cd WordToMarkdownFunction
+code function.json
 ```
 ```json
 {
@@ -126,7 +126,7 @@ code WordToMarkdownFunction/function.json
 }
 ```
 ```bash
-code WordToMarkdownFunction/__init__.py
+code __init__.py
 ```
 ```python
 import logging
@@ -259,7 +259,6 @@ WordToMarkdown/
 ├── Dockerfile
 ├── requirements.txt
 ├── host.json
-├── local.settings.json
 └── WordToMarkdownFunction/
     ├── __init__.py
     └── function.json
