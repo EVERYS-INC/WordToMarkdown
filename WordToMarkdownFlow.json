@@ -1,0 +1,418 @@
+{
+    "definition": {
+        "$schema": "https://schema.management.azure.com/providers/Microsoft.Logic/schemas/2016-06-01/workflowdefinition.json#",
+        "contentVersion": "1.0.0.0",
+        "triggers": {
+            "BLOB_が追加または変更されたとき_(プロパティのみ)_(V2)": {
+                "type": "ApiConnection",
+                "inputs": {
+                    "host": {
+                        "connection": {
+                            "name": "@parameters('$connections')['azureblob-1']['connectionId']"
+                        }
+                    },
+                    "method": "get",
+                    "path": "/v2/datasets/@{encodeURIComponent(encodeURIComponent('AccountNameFromSettings'))}/triggers/batch/onupdatedfile",
+                    "queries": {
+                        "folderId": "JTJmd29yZC1pbnB1dA==",
+                        "maxFileCount": 10,
+                        "checkBothCreatedAndModifiedDateTime": false
+                    }
+                },
+                "recurrence": {
+                    "interval": 3,
+                    "frequency": "Minute"
+                },
+                "splitOn": "@triggerBody()",
+                "metadata": {
+                    "JTJmbWQtb3V0cHV0": "/md-output",
+                    "JTJmd29yZC1pbnB1dA==": "/word-input"
+                }
+            }
+        },
+        "actions": {
+            "HTTP(AzureFunctionの呼び出し）": {
+                "type": "Http",
+                "inputs": {
+                    "uri": "https://<your-function-name>.japaneast.azurecontainerapps.io/api/WordToMarkdownFunction",
+                    "method": "POST",
+                    "body": {
+                        "inputContainer": "word-input",
+                        "inputBlobPath": "@{triggerBody()?['Name']}",
+                        "outputContainer": "md-output"
+                    }
+                },
+                "runAfter": {},
+                "runtimeConfiguration": {
+                    "contentTransfer": {
+                        "transferMode": "Chunked"
+                    }
+                }
+            },
+            "Parse_JSON": {
+                "type": "ParseJson",
+                "inputs": {
+                    "content": "@body('HTTP(AzureFunctionの呼び出し）')",
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "status": {
+                                "type": "string"
+                            },
+                            "message": {
+                                "type": "string"
+                            },
+                            "timestamp": {
+                                "type": "string"
+                            },
+                            "files": {
+                                "type": "object",
+                                "properties": {
+                                    "markdown": {
+                                        "type": "object",
+                                        "properties": {
+                                            "name": {
+                                                "type": "string"
+                                            },
+                                            "path": {
+                                                "type": "string"
+                                            },
+                                            "container": {
+                                                "type": "string"
+                                            },
+                                            "url": {
+                                                "type": "string"
+                                            }
+                                        }
+                                    },
+                                    "images": {
+                                        "type": "array",
+                                        "items": {
+                                            "type": "object",
+                                            "properties": {
+                                                "name": {
+                                                    "type": "string"
+                                                },
+                                                "path": {
+                                                    "type": "string"
+                                                },
+                                                "container": {
+                                                    "type": "string"
+                                                },
+                                                "url": {
+                                                    "type": "string"
+                                                },
+                                                "contentType": {
+                                                    "type": "string"
+                                                },
+                                                "size": {
+                                                    "type": "integer"
+                                                }
+                                            },
+                                            "required": [
+                                                "name",
+                                                "path",
+                                                "container",
+                                                "url",
+                                                "contentType",
+                                                "size"
+                                            ]
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                },
+                "runAfter": {
+                    "HTTP(AzureFunctionの呼び出し）": [
+                        "Succeeded"
+                    ]
+                }
+            },
+            "For_each": {
+                "type": "Foreach",
+                "foreach": "@body('Parse_JSON')?['files']?['images']",
+                "actions": {
+                    "Condition": {
+                        "type": "If",
+                        "expression": {
+                            "and": [
+                                {
+                                    "contains": [
+                                        "@items('For_each')?['name']",
+                                        ".png"
+                                    ]
+                                }
+                            ]
+                        },
+                        "actions": {
+                            "画像データの取得": {
+                                "type": "ApiConnection",
+                                "inputs": {
+                                    "host": {
+                                        "connection": {
+                                            "name": "@parameters('$connections')['azureblob-1']['connectionId']"
+                                        }
+                                    },
+                                    "method": "get",
+                                    "path": "/v2/datasets/@{encodeURIComponent(encodeURIComponent('AccountNameFromSettings'))}/files/@{encodeURIComponent(encodeURIComponent(concat('/md-output/',items('For_each')?['path'])))}/content",
+                                    "queries": {
+                                        "inferContentType": true
+                                    }
+                                }
+                            },
+                            "HTTP(OpenAiで画像の解析）": {
+                                "type": "Http",
+                                "inputs": {
+                                    "uri": "https://<your-openai-name>.openai.azure.com/openai/deployments/gpt-4o/chat/completions?api-version=2024-02-15-preview",
+                                    "method": "POST",
+                                    "headers": {
+                                        "Content-Type": "application/json",
+                                        "api-key": "<your-openai-apikey>"
+                                    },
+                                    "body": {
+                                        "messages": [
+                                            {
+                                                "role": "system",
+                                                "content": [
+                                                    {
+                                                        "type": "text",
+                                                        "text": "画像の説明文を以下の形式でcsv形式で出力してください。説明は日本語でしてください。「```csv」　のようなコードブロック用の表記は省略し、csv本文のみ出力してください。-ヘッダーは以下の通りです。\n\nファイル名：@{items('For_each')?['name']},画像の説明文:"
+                                                    }
+                                                ]
+                                            },
+                                            {
+                                                "role": "user",
+                                                "content": [
+                                                    {
+                                                        "type": "image_url",
+                                                        "image_url": {
+                                                            "url": "data:image/png;base64,@{body('画像データの取得').$content}"
+                                                        }
+                                                    }
+                                                ]
+                                            },
+                                            {
+                                                "role": "assistant",
+                                                "content": [
+                                                    {
+                                                        "type": "text",
+                                                        "text": ""
+                                                    }
+                                                ]
+                                            }
+                                        ],
+                                        "temperature": 0.7,
+                                        "top_p": 0.95,
+                                        "max_tokens": 4000
+                                    }
+                                },
+                                "runAfter": {
+                                    "画像データの取得": [
+                                        "Succeeded"
+                                    ]
+                                },
+                                "runtimeConfiguration": {
+                                    "contentTransfer": {
+                                        "transferMode": "Chunked"
+                                    }
+                                }
+                            },
+                            "画像の説明文を配列に追加": {
+                                "type": "AppendToArrayVariable",
+                                "inputs": {
+                                    "name": "imageDescriptions",
+                                    "value": "@body('HTTP(OpenAiで画像の解析）')['choices'][0]['message']['content']"
+                                },
+                                "runAfter": {
+                                    "HTTP(OpenAiで画像の解析）": [
+                                        "Succeeded"
+                                    ]
+                                }
+                            }
+                        },
+                        "else": {
+                            "actions": {}
+                        }
+                    }
+                },
+                "runAfter": {
+                    "Initialize_variable": [
+                        "Succeeded"
+                    ]
+                }
+            },
+            "Initialize_variable": {
+                "type": "InitializeVariable",
+                "inputs": {
+                    "variables": [
+                        {
+                            "name": "imageDescriptions",
+                            "type": "array",
+                            "value": []
+                        }
+                    ]
+                },
+                "runAfter": {
+                    "Parse_JSON": [
+                        "Succeeded"
+                    ]
+                }
+            },
+            "Compose": {
+                "type": "Compose",
+                "inputs": "@replace(join(variables('imageDescriptions'), ';'), ';', decodeUriComponent('%0D%0A'))",
+                "runAfter": {
+                    "For_each": [
+                        "Succeeded"
+                    ]
+                }
+            },
+            "mdファイルの取得（画像説明なし）": {
+                "type": "ApiConnection",
+                "inputs": {
+                    "host": {
+                        "connection": {
+                            "name": "@parameters('$connections')['azureblob-1']['connectionId']"
+                        }
+                    },
+                    "method": "get",
+                    "path": "/v2/datasets/@{encodeURIComponent(encodeURIComponent('AccountNameFromSettings'))}/files/@{encodeURIComponent(encodeURIComponent(concat('/md-output/',body('Parse_JSON')?['files']?['markdown']?['path'])))}/content",
+                    "queries": {
+                        "inferContentType": true
+                    }
+                },
+                "runAfter": {
+                    "画像説明分のCSVを作成": [
+                        "Succeeded"
+                    ]
+                }
+            },
+            "HTTP(OpenAiで画像の説明文を元のmdファイルに追加する）": {
+                "type": "Http",
+                "inputs": {
+                    "uri": "https://<your-openai-name>.openai.azure.com/openai/deployments/gpt-4o/chat/completions?api-version=2024-02-15-preview",
+                    "method": "POST",
+                    "headers": {
+                        "Content-Type": "application/json",
+                        "api-key": "<your-openai-apikey>"
+                    },
+                    "body": {
+                        "messages": [
+                            {
+                                "role": "system",
+                                "content": [
+                                    {
+                                        "type": "text",
+                                        "text": "このマークダウンファイルのimg srcタグの後に、各画像の説明文を追加してください。元のmdファイルの文章はそのまま出力してください:\n元のmdファイル:@{concat(body('mdファイルの取得（画像説明なし）'), outputs('Compose'))}\n画像の説明文:@{outputs('Compose')}"
+                                    }
+                                ]
+                            },
+                            {
+                                "role": "user",
+                                "content": [
+                                    {
+                                        "type": "text",
+                                        "text": ""
+                                    }
+                                ]
+                            },
+                            {
+                                "role": "assistant",
+                                "content": [
+                                    {
+                                        "type": "text",
+                                        "text": ""
+                                    }
+                                ]
+                            }
+                        ],
+                        "temperature": 0.7,
+                        "top_p": 0.95,
+                        "max_tokens": 8000
+                    }
+                },
+                "runAfter": {
+                    "mdファイルの取得（画像説明なし）": [
+                        "Succeeded"
+                    ]
+                },
+                "runtimeConfiguration": {
+                    "contentTransfer": {
+                        "transferMode": "Chunked"
+                    }
+                }
+            },
+            "画像説明分のCSVを作成": {
+                "type": "ApiConnection",
+                "inputs": {
+                    "host": {
+                        "connection": {
+                            "name": "@parameters('$connections')['azureblob-1']['connectionId']"
+                        }
+                    },
+                    "method": "post",
+                    "body": "@outputs('Compose')",
+                    "headers": {
+                        "ReadFileMetadataFromServer": true
+                    },
+                    "path": "/v2/datasets/@{encodeURIComponent(encodeURIComponent('AccountNameFromSettings'))}/files",
+                    "queries": {
+                        "folderPath": "@concat('/md-output/',body('Parse_JSON')?['timestamp'])",
+                        "name": "@concat('imageDescriptions_',formatDateTime(addHours(utcNow(), 9), 'yyyyMMdd_HHmmss'),'.csv')",
+                        "queryParametersSingleEncoded": true
+                    }
+                },
+                "runAfter": {
+                    "Compose": [
+                        "Succeeded"
+                    ]
+                },
+                "runtimeConfiguration": {
+                    "contentTransfer": {
+                        "transferMode": "Chunked"
+                    }
+                }
+            },
+            "画像説明文入りのmdファイルの作成": {
+                "type": "ApiConnection",
+                "inputs": {
+                    "host": {
+                        "connection": {
+                            "name": "@parameters('$connections')['azureblob-1']['connectionId']"
+                        }
+                    },
+                    "method": "post",
+                    "body": "@body('HTTP(OpenAiで画像の説明文を元のmdファイルに追加する）')['choices'][0]['message']['content']",
+                    "headers": {
+                        "ReadFileMetadataFromServer": true
+                    },
+                    "path": "/v2/datasets/@{encodeURIComponent(encodeURIComponent('AccountNameFromSettings'))}/files",
+                    "queries": {
+                        "folderPath": "@concat('/md-output/',body('Parse_JSON')?['timestamp'])",
+                        "name": "@concat(replace(triggerBody()?['Name'],'.docx',''),'_modified_',formatDateTime(addHours(utcNow(), 9), 'yyyyMMdd_HHmmss'),'.md')",
+                        "queryParametersSingleEncoded": true
+                    }
+                },
+                "runAfter": {
+                    "HTTP(OpenAiで画像の説明文を元のmdファイルに追加する）": [
+                        "Succeeded"
+                    ]
+                },
+                "runtimeConfiguration": {
+                    "contentTransfer": {
+                        "transferMode": "Chunked"
+                    }
+                }
+            }
+        },
+        "outputs": {},
+        "parameters": {
+            "$connections": {
+                "type": "Object",
+                "defaultValue": {}
+            }
+        }
+    }
+}
